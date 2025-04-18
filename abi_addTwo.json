@@ -1,0 +1,33 @@
+{
+  "functions": [
+    {
+      "name": "add",
+      "params": [
+        {
+          "name": "a",
+          "type": "i32"
+        },
+        {
+          "name": "b",
+          "type": "i32"
+        }
+      ],
+      "result": "i32",
+      "selector": "0xf212493a"
+    },
+    {
+      "name": "shout",
+      "params": [],
+      "result": "string",
+      "selector": "0x5c69b9cd"
+    }
+  ],
+  "classes": [],
+  "variables": [
+    {
+      "name": "url",
+      "type": "string",
+      "selector": "0x901752af"
+    }
+  ]
+}
