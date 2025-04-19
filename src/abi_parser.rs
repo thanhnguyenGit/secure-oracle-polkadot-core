@@ -1,3 +1,4 @@
+use std::fmt::format;
 use serde::{Serialize, Deserialize};
 use anyhow::{Result, anyhow};
 use std::fs::File;
@@ -6,20 +7,28 @@ use regex::Regex;
 use clap::Parser;
 use sha2::{Sha256, Digest};
 use hex;
+use std::path::Path;
+use std::process::Command;
 
-#[derive(Parser)]
+#[derive(Parser, Debug)]
+#[command(about = "Generate JSON ABI from an AssemblyScript .ts file")]
 struct Args {
-    #[clap(short, long, default_value = "./addTwo.ts")]
     input: String,
-    #[clap(short, long, default_value = "abi_addTwo.json")]
     output: String,
 }
 
 #[derive(Serialize, Deserialize)]
 struct Abi {
+    headers: Vec<AbiHeader>,
     functions: Vec<AbiFunction>,
     classes: Vec<AbiClass>,
     variables: Vec<AbiVariable>,
+}
+
+#[derive(Serialize,Deserialize)]
+struct AbiHeader {
+    name: Option<String>,
+    signature: String
 }
 
 #[derive(Serialize, Deserialize)]
@@ -65,6 +74,36 @@ struct AbiVariable {
     selector: String,
 }
 
+fn validate_args(args: &Args) -> Result<()> {
+    let input_path = Path::new(&args.input);
+    if !input_path.exists() {
+        return Err(anyhow!("Input file '{}' does not exist", args.input));
+    }
+    if input_path.extension().and_then(|ext| ext.to_str()) != Some("ts") {
+        return Err(anyhow!("Input file '{}' must have .ts extension", args.input));
+    }
+    let output_path = Path::new(&args.output);
+    if output_path.extension().and_then(|ext| ext.to_str()) != Some("json") {
+        return Err(anyhow!("Output file '{}' must have .json extension", args.output));
+    }
+    Ok(())
+}
+
+fn convert_ts_to_wasm(input: &str, wasm_output: &str) -> Result<()> {
+    let output = Command::new("asc")
+        .arg(input)
+        .arg("--outFile")
+        .arg(wasm_output)
+        .arg("--optimize")
+        .output()
+        .map_err(|err| anyhow!("Failed to execute 'asc' command, error at: {}", err))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(anyhow!("asc - AssebmlyScript Compiler failed: {}", stderr))
+    }
+    Ok(())
+}
+
 fn compute_selector(name: &str, params: &[AbiParam]) -> String {
     let signature = if params.is_empty() {
         format!("{}()", name)
@@ -80,17 +119,33 @@ fn compute_selector(name: &str, params: &[AbiParam]) -> String {
 
 pub fn parser() -> Result<()> {
     let args = Args::parse();
+    validate_args(&args)?;
+    let wasm_output = args.input.replace(".ts", ".wasm");
+    convert_ts_to_wasm(&args.input, &wasm_output)?;
+
+    let wasm_hash = {
+        let mut header_hasher = Sha256::new();
+        let mut wasm_reader = File::open(&wasm_output)
+            .map_err(|e| anyhow!("ERROR: failed to read WASM file: {}", e))?;
+        let mut wasm_content = Vec::new();
+        wasm_reader.read_to_end(&mut wasm_content)
+            .map_err(|e| anyhow!("ERROR: failed to parse the wasm content to variable: {}", e))?;
+        header_hasher.update(&wasm_content);
+        let hash = header_hasher.finalize();
+        format!("0x{:x}", hash)
+    };
 
     let mut file = File::open(&args.input)?;
     let mut content = String::new();
     file.read_to_string(&mut content)?;
 
-    // Initialize ABI
     let mut abi = Abi {
+        headers: Vec::new(),
         functions: Vec::new(),
         classes: Vec::new(),
         variables: Vec::new(),
     };
+
     let func_re = Regex::new(r"export\s+function\s+(\w+)\s*\((.*?)\)\s*:\s*(\w+|\Array<\w+>|[\w<>]+)\s*\{")?;
     let class_re = Regex::new(r"export\s+class\s+(\w+)\s*\{")?;
     let constructor_re = Regex::new(r"constructor\s*\((.*?)\)\s*\{")?;
@@ -153,8 +208,6 @@ pub fn parser() -> Result<()> {
             });
             continue;
         }
-
-        // Parse exported classes
         if let Some(captures) = class_re.captures(line) {
             let class_name = captures[1].to_string();
             current_class = Some(AbiClass {
@@ -165,8 +218,6 @@ pub fn parser() -> Result<()> {
             });
             continue;
         }
-
-        // Parse constructor for fields
         if let Some(ref mut class) = current_class {
             if let Some(captures) = constructor_re.captures(line) {
                 let params_str = captures[1].trim();
@@ -223,10 +274,16 @@ pub fn parser() -> Result<()> {
         last_doc = None;
     }
 
+    abi.headers.push(AbiHeader {
+        name: None,
+        signature: wasm_hash,
+    });
+
     let json = serde_json::to_string_pretty(&abi)?;
+
     let mut file = File::create(&args.output)?;
     file.write_all(json.as_bytes())?;
-
     println!("Generated ABI written to {}", args.output);
+
     Ok(())
 }

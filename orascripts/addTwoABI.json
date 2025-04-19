@@ -1,4 +1,10 @@
 {
+  "headers": [
+    {
+      "name": null,
+      "signature": "0x34229fb603c5d0317b4ae380c63869e8333f4fd23654ceab3112b2be2d43bc1c"
+    }
+  ],
   "functions": [
     {
       "name": "add",
