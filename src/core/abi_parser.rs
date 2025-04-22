@@ -1,4 +1,3 @@
-use std::fmt::format;
 use serde::{Serialize, Deserialize};
 use anyhow::{Result, anyhow};
 use std::fs::File;
@@ -9,6 +8,7 @@ use sha2::{Sha256, Digest};
 use hex;
 use std::path::Path;
 use std::process::Command;
+use clap::parser::ValueSource::DefaultValue;
 
 #[derive(Parser, Debug)]
 #[command(about = "Generate JSON ABI from an AssemblyScript .ts file")]
@@ -19,16 +19,16 @@ struct Args {
 
 #[derive(Serialize, Deserialize)]
 struct Abi {
-    headers: Vec<AbiHeader>,
+    headers: AbiHeader,
     functions: Vec<AbiFunction>,
     classes: Vec<AbiClass>,
     variables: Vec<AbiVariable>,
 }
 
-#[derive(Serialize,Deserialize)]
+#[derive(Serialize,Deserialize,Default)]
 struct AbiHeader {
     name: Option<String>,
-    signature: String
+    header: String
 }
 
 #[derive(Serialize, Deserialize)]
@@ -99,7 +99,7 @@ fn convert_ts_to_wasm(input: &str, wasm_output: &str) -> Result<()> {
         .map_err(|err| anyhow!("Failed to execute 'asc' command, error at: {}", err))?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(anyhow!("asc - AssebmlyScript Compiler failed: {}", stderr))
+        return Err(anyhow!("asc - AssemblyScript Compiler failed: {}", stderr))
     }
     Ok(())
 }
@@ -140,7 +140,7 @@ pub fn parser() -> Result<()> {
     file.read_to_string(&mut content)?;
 
     let mut abi = Abi {
-        headers: Vec::new(),
+        headers: Default::default(),
         functions: Vec::new(),
         classes: Vec::new(),
         variables: Vec::new(),
@@ -158,7 +158,7 @@ pub fn parser() -> Result<()> {
     let mut current_class: Option<AbiClass> = None;
     let mut last_doc: Option<String> = None;
 
-    for (i, line) in lines.iter().enumerate() {
+    for (_, line) in lines.iter().enumerate() {
         let line = line.trim();
         if line.is_empty() {
             continue;
@@ -274,10 +274,10 @@ pub fn parser() -> Result<()> {
         last_doc = None;
     }
 
-    abi.headers.push(AbiHeader {
+    abi.headers = AbiHeader {
         name: None,
-        signature: wasm_hash,
-    });
+        header: wasm_hash,
+    };
 
     let json = serde_json::to_string_pretty(&abi)?;
 

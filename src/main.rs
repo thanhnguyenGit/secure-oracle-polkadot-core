@@ -1,24 +1,32 @@
-mod abi_parser;
-mod regex_str;
+mod core;
+mod traits;
+mod utils;
 
+use std::collections::HashMap;
+use std::fmt::format;
 use wasmtime::*;
-use anyhow::Result;
-use crate::abi_parser::parser;
-
-fn main() {
-    parser().expect("INFO: error at abi_parser.rs file");
-    // wasmtime_runner().expect("INFO: error at wastime_runner() in main.rs");
-    // abi_reader("./orascripts/addTwoABI.json").unwrap()
-}
-
+use anyhow::{anyhow, Result};
 use serde::{Deserialize};
 use std::fs;
+use std::fs::File;
+use std::io::Read;
+use serde_json::json;
+use sha2::{Sha256, Digest};
+use crate::core::abi_parser::parser;
+use crate::traits::traits::ABIType;
 
 #[derive(Debug, Deserialize)]
 struct Root {
+    headers : Header,
     functions: Vec<Function>,
     classes: Vec<Class>,
     variables: Vec<Variable>,
+}
+
+#[derive(Debug,Deserialize)]
+struct Header {
+    name : Option<String>,
+    header : String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -38,7 +46,9 @@ struct Param {
 
 #[derive(Debug, Deserialize)]
 struct Class {
-    // Add class fields when needed
+    name: String,
+    fields : Vec<Param>,
+    methods: Vec<Function>
 }
 
 #[derive(Debug, Deserialize)]
@@ -49,30 +59,77 @@ struct Variable {
     selector: String,
 }
 
-// trait AbiType {
-//     fn get_
-// }
+impl ABIType for Function {}
+impl ABIType for Class {}
+impl ABIType for Param {}
+impl ABIType for Variable {}
 
-fn abi_reader(path: &str) -> Result<(), Box<dyn std::error::Error>> {
-    let file_content = fs::read_to_string(path)?;
+#[derive(Default)]
+struct SelectorRegistry {
+    origin : String,
+    storage : HashMap<String,Box<dyn ABIType>>,
+}
+fn main() {
+    // parser().expect("INFO: error at abi_parser.rs file");
+    abi_reader("./orascripts/orascriptABI.json","./orascripts/orascript.wasm").expect("ERROR: Error occur at abi_reader() in main.rs");
+    // wasmtime_runner().expect("INFO: error at wastime_runner() in main.rs");
+    // abi_reader("./orascripts/addTwoABI.json").unwrap()
+}
+
+fn check_header_hash(header : &str) -> bool {
+    let wasm_hash = {
+        let mut header_hasher = Sha256::new();
+        let mut wasm_reader = File::open("./orascripts/orascript.wasm")
+            .map_err(|e| anyhow!("ERROR: failed to read WASM file: {}", e)).expect("Re check bro 1");
+        let mut wasm_content = Vec::new();
+        wasm_reader.read_to_end(&mut wasm_content)
+            .map_err(|e| anyhow!("ERROR: failed to parse the wasm content to variable: {}", e)).expect("Re check bro 2");
+        header_hasher.update(&wasm_content);
+        let hash = header_hasher.finalize();
+        format!("0x{:x}", hash)
+    };
+    header.eq(&wasm_hash)
+}
+
+fn abi_reader(abi_path: &str, wasm_bytecode_path: &str) -> Result<()> {
+    let file_content = fs::read_to_string(abi_path)?;
     let root: Root = serde_json::from_str(&file_content)?;
-    let target_selector = "0xf212493a";
 
-    if let Some(func) = root.functions.iter().find(|f| f.selector == target_selector) {
-        println!("Function with selector {}: {:#?}", target_selector, func);
-    } else if let Some(var) = root.variables.iter().find(|v| v.selector == target_selector) {
-        println!("Variable with selector {}: {:#?}", target_selector, var);
-    } else {
-        println!("Selector {} not found", target_selector);
+    let mut selector_registry = SelectorRegistry {
+        origin: root.headers.header.clone(),
+        storage: Default::default(),
+    };
+
+    assert_eq!(check_header_hash(&root.headers.header), true,
+               "The hash from {:?} is not equal to the header {:?}",abi_path,root.headers.header
+    );
+
+    let mut insert_selector = |sel, abi_item| {
+        selector_registry.storage.insert(sel, abi_item);
+    };
+
+    for (_,value) in root.functions.into_iter().enumerate() {
+        insert_selector(value.selector.clone(),Box::new(value));
     }
+    for value in root.classes.into_iter().flat_map(|class| class.methods.into_iter()) {
+        insert_selector(value.selector.clone(),Box::new(value));
+    }
+    for (_,value) in root.variables.into_iter().enumerate() {
+        insert_selector(value.selector.clone(),Box::new(value));
+    }
+
+    for (key,value) in selector_registry.storage.iter() {
+        println!("Selector: {:#?} - Meta: {:#?}", key,value);
+    }
+    let _ = wasmtime_runner(wasm_bytecode_path,selector_registry);
     Ok(())
 }
 
 
-fn wasmtime_runner() -> Result<()> {
+fn wasmtime_runner(path: &str,register : SelectorRegistry) -> Result<()> {
     let engine = Engine::default();
     let mut store = Store::new(&engine, ());
-    let module = Module::from_file(&engine, "./orascripts/addTwo.wasm")?;
+    let module = Module::from_file(&engine, path)?;
     let instance = Instance::new(&mut store, &module, &[])?;
 
     let add_func = instance
