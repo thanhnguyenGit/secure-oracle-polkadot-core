@@ -902,6 +902,21 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2b15c43186be67a4fd63bee50d0303afffcef381492ebe2c5d87f324e1b8815c"
 
 [[package]]
+name = "runtime"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "hex",
+ "regex",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tokio",
+ "wasmtime",
+]
+
+[[package]]
 name = "rustc-demangle"
 version = "0.1.24"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1197,21 +1212,6 @@ checksum = "05d30290541f2d4242a162bbda76b8f2d8b1ac59eab3568ed6f2327d52c9b2c4"
 dependencies = [
  "leb128fmt",
  "wasmparser 0.228.0",
-]
-
-[[package]]
-name = "wasmi-test"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "clap",
- "hex",
- "regex",
- "serde",
- "serde_json",
- "sha2",
- "tokio",
- "wasmtime",
 ]
 
 [[package]]
