@@ -1,0 +1,31 @@
+{
+  "headers": {
+    "name": null,
+    "header": "0xec7ee827249c30cbff64ed7d54596dcdc33e55659d71d1ffde936895aeaa1f28"
+  },
+  "functions": [],
+  "classes": [
+    {
+      "name": "SourceSchema",
+      "fields": [
+        {
+          "name": "fact",
+          "type": "string"
+        },
+        {
+          "name": "length",
+          "type": "string"
+        }
+      ],
+      "methods": []
+    }
+  ],
+  "variables": [
+    {
+      "name": "cat_fact_url",
+      "type": "string",
+      "selector": "0x7c7b76ac"
+    }
+  ],
+  "imports": []
+}

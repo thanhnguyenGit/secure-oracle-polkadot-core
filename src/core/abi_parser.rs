@@ -3,14 +3,14 @@ use anyhow::{Result, anyhow};
 use std::fs::File;
 use std::io::{Read, Write};
 use regex::Regex;
-use clap::Parser;
+use clap::Parser as ClapParser;
 use sha2::{Sha256, Digest};
 use hex;
 use std::path::Path;
 use std::process::Command;
-use clap::parser::ValueSource::DefaultValue;
+use wasmparser::{Parser, Payload, ImportSectionReader, TypeRef};
 
-#[derive(Parser, Debug)]
+#[derive(ClapParser, Debug)]
 #[command(about = "Generate JSON ABI from an AssemblyScript .ts file")]
 struct Args {
     input: String,
@@ -23,6 +23,35 @@ struct Abi {
     functions: Vec<AbiFunction>,
     classes: Vec<AbiClass>,
     variables: Vec<AbiVariable>,
+    imports: Vec<AbiImport>
+}
+
+#[derive(Serialize,Deserialize)]
+struct AbiImport {
+    module: String,
+    name: String,
+    kind: ImportKind
+}
+
+#[derive(Serialize,Deserialize)]
+enum ImportKind {
+    Function {
+        params: Vec<String>,
+        result: Option<String>,
+    },
+    Memory {
+        min: u32,
+        max: Option<u32>,
+    },
+    Global {
+        type_: String,
+        mutable: bool,
+    },
+    Table {
+        type_: String,
+        min: u32,
+        max: Option<u32>,
+    },
 }
 
 #[derive(Serialize,Deserialize,Default)]
@@ -117,7 +146,7 @@ fn compute_selector(name: &str, params: &[AbiParam]) -> String {
     format!("0x{}", hex::encode(&result[..4]))
 }
 
-pub fn parser() -> Result<()> {
+pub fn abi_parser() -> Result<()> {
     let args = Args::parse();
     validate_args(&args)?;
     let wasm_output = args.input.replace(".ts", ".wasm");
@@ -144,10 +173,12 @@ pub fn parser() -> Result<()> {
         functions: Vec::new(),
         classes: Vec::new(),
         variables: Vec::new(),
+        imports: Vec::new(),
     };
 
     let func_re = Regex::new(r"export\s+function\s+(\w+)\s*\((.*?)\)\s*:\s*(\w+|\Array<\w+>|[\w<>]+)\s*\{")?;
-    let class_re = Regex::new(r"export\s+class\s+(\w+)\s*\{")?;
+    let class_re = Regex::new(r"class\s+(\w+)\s*\{")?;
+    let class_field_re = Regex::new(r"(\w+)\s*:\s*(\w+|\Array<\w+>|[\w<>]+)\s*;")?;
     let constructor_re = Regex::new(r"constructor\s*\((.*?)\)\s*\{")?;
     let method_re = Regex::new(r"(\w+)\s*\((.*?)\)\s*:\s*(\w+|\Array<\w+>|[\w<>]+)\s*\{")?;
     let param_re = Regex::new(r"(public\s+)?(\w+)\s*:\s*(\w+|\Array<\w+>|[\w<>]+)")?;
@@ -235,6 +266,15 @@ pub fn parser() -> Result<()> {
                         }
                     }
                 }
+                continue;
+            }
+            if let Some(captures) = class_field_re.captures(line) {
+                let field_name = captures[1].to_string();
+                let field_type = captures[2].to_string();
+                class.fields.push(AbiField {
+                    name: field_name,
+                    type_: field_type,
+                });
                 continue;
             }
             if let Some(captures) = method_re.captures(line) {

@@ -5,8 +5,7 @@ use std::io::Read;
 use anyhow::{anyhow,Result};
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
-use wasmtime::{Engine, Func, Instance, Module, Store, Val};
-use wasmtime::Val::I32;
+use wasmtime::{Engine, Func, Instance, Module, Store, Val, Linker, Caller, ImportType, Extern};
 
 #[derive(Debug, Deserialize)]
 struct Root {
@@ -69,7 +68,7 @@ pub fn abi_reader(abi_path: &str, wasm_bytecode_path: &str) -> anyhow::Result<()
         variables: HashMap::default(),
     };
 
-    assert_eq!(check_header_hash(&root.headers.header), true,
+    assert_eq!(check_header_hash(&root.headers.header,wasm_bytecode_path), true,
                "The hash from {:?} is not equal to the header {:?}",abi_path,root.headers.header
     );
 
@@ -82,21 +81,14 @@ pub fn abi_reader(abi_path: &str, wasm_bytecode_path: &str) -> anyhow::Result<()
     for (_,value) in root.variables.into_iter().enumerate() {
         selector_registry.variables.insert(value.selector.clone(),value);
     }
-
-    for (key,value) in selector_registry.functions.iter() {
-        println!("Selector: {:#?} - Meta: {:#?}", key,*value);
-    }
-    for (key,value) in selector_registry.variables.iter() {
-        println!("Selector: {:#?} - Meta: {:#?}", key,*value);
-    }
     wasmtime_runner(wasm_bytecode_path,selector_registry).expect("DEBUG: wasmtime runner run");
     Ok(())
 }
 
-fn check_header_hash(header : &str) -> bool {
+fn check_header_hash(header : &str,wasm_bytecode_path: &str) -> bool {
     let wasm_hash = {
         let mut header_hasher = Sha256::new();
-        let mut wasm_reader = File::open("./orascripts/orascript.wasm")
+        let mut wasm_reader = File::open(wasm_bytecode_path)
             .map_err(|e| anyhow!("ERROR: failed to read WASM file: {}", e)).expect("Re check bro 1");
         let mut wasm_content = Vec::new();
         wasm_reader.read_to_end(&mut wasm_content)
@@ -112,6 +104,28 @@ fn wasmtime_runner(path: &str,register : SelectorRegistry) -> anyhow::Result<()>
     let engine = Engine::default();
     let mut store = Store::new(&engine, ());
     let module = Module::from_file(&engine, path)?;
+
+    // let mut linker = Linker::new(&engine);
+    // linker.func_wrap(
+    //     "env",
+    //     "abort",
+    //     |caller: Caller<'_, ()>, ptr: i32, file: i32, line: i32, col: i32| {
+    //         println!("Abort called: ptr={}, file={}, line={}, col={}", ptr, file, line, col);
+    //         std::process::exit(1);
+    //     },
+    // )?;
+
+    if module.imports().len() != 0 {
+        for import_type in module.imports() {
+            println!("Import module: {:#?} - Import name: {:#?}", import_type.module(), import_type.name());
+        }
+    }
+    for i in module.exports() {
+        println!("Module export type: {:#?}", i);
+    }
+
+    println!("Module name: {:#?}", module.name());
+
     let instance = Instance::new(&mut store, &module, &[])?;
 
     // Cái này để test, sau này sẽ chỉ có một entrypoint.
@@ -141,8 +155,8 @@ fn wasmtime_runner(path: &str,register : SelectorRegistry) -> anyhow::Result<()>
 
     let func = instance.get_func(&mut store, meta.name.as_ref()).expect("Function name not exist");
     
-    let trigger_func = func.call(&mut store, &typ_val_map, &mut [I32(12)]).expect("Bruh");
-    println!("Result of add(42, 58): {}", trigger_func);
+    // let trigger_func = func.call(&mut store, &typ_val_map, &mut [I32(12)]).expect("Bruh");
+    // println!("Result of add(42, 58): {}", trigger_func);
     
     let add_func = instance
         .get_typed_func::<(i32, i32), i32>(&mut store, "add")?;

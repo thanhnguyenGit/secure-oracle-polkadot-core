@@ -1,0 +1,51 @@
+{
+  "headers": {
+    "name": null,
+    "header": "0x0b773c3548a0517c7481dc0d6a5b87e3fc6fe4370299c22eaea3b1ac29980b27"
+  },
+  "functions": [
+    {
+      "name": "process",
+      "params": [
+        {
+          "name": "input",
+          "type": "Input"
+        }
+      ],
+      "result": "Ouput",
+      "selector": "0x2d60647e"
+    }
+  ],
+  "classes": [
+    {
+      "name": "Input",
+      "fields": [
+        {
+          "name": "a",
+          "type": "i32"
+        },
+        {
+          "name": "b",
+          "type": "i32"
+        }
+      ],
+      "methods": []
+    },
+    {
+      "name": "Ouput",
+      "fields": [
+        {
+          "name": "sum",
+          "type": "i32"
+        },
+        {
+          "name": "product",
+          "type": "i32"
+        }
+      ],
+      "methods": []
+    }
+  ],
+  "variables": [],
+  "imports": []
+}
