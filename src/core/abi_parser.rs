@@ -79,6 +79,7 @@ struct AbiParam {
 
 #[derive(Serialize, Deserialize)]
 struct AbiClass {
+    class_selector: String,
     name: String,
     fields: Vec<AbiField>,
     methods: Vec<AbiFunction>,
@@ -242,6 +243,7 @@ pub fn abi_parser() -> Result<()> {
         if let Some(captures) = class_re.captures(line) {
             let class_name = captures[1].to_string();
             current_class = Some(AbiClass {
+                class_selector: compute_selector(&class_name,&[]),
                 name: class_name,
                 fields: Vec::new(),
                 methods: Vec::new(),
@@ -295,7 +297,6 @@ pub fn abi_parser() -> Result<()> {
                         }
                     }
                 }
-
                 let selector = compute_selector(&method_name, &params);
                 class.methods.push(AbiFunction {
                     name: method_name,
