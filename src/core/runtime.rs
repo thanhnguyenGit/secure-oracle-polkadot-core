@@ -1,3 +1,4 @@
+use std::any::Any;
 use std::collections::HashMap;
 use std::fs;
 use std::fs::File;
@@ -5,7 +6,7 @@ use std::io::Read;
 use anyhow::{anyhow,Result};
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
-use wasmtime::{Engine, Func, Instance, Module, Store, Val, Linker, Caller, ImportType, Table, Extern, ExternType, ValType, V128, Ref};
+use wasmtime::{Engine, Func, Instance, Module, Store, Val, Linker, Caller, ImportType, Table, Extern, ExternType, ValType, V128, Ref, WasmTy};
 use dynamic_struct::generate_struct;
 #[derive(Debug, Deserialize)]
 struct Root {
@@ -129,29 +130,40 @@ fn wasmtime_runner(path: &str,register : SelectorRegistry) -> anyhow::Result<()>
 
     // DEBUG:
     // ------
-    for (k,v) in register.functions.iter() {
-        println!("Key: {k:#?} - Value: {v:#?}");
-    }
-    for (k,v) in register.classes_schema.iter() {
-        println!("Key: {k:#?} - Value: {v:#?}");
-    }
+    // for (k,v) in register.functions.iter() {
+    //     println!("Key: {k:#?} - Value: {v:#?}");
+    // }
+    // for (k,v) in register.classes_schema.iter() {
+    //     println!("Key: {k:#?} - Value: {v:#?}");
+    // }
     // -----
     let mut externlts : Vec<Extern> = Vec::new();
     if module.imports().len() != 0 {
         for import in module.imports() {
             println!(
-                "Import module: {:#?}, name: {:#?}, type: {:#?}",
+                "Import module: {:#?}, name: {:#?}",
                 import.module(),
                 import.name(),
-                import.ty()
             );
             match import.ty() {
                 ExternType::Func(func_ty) => {
-                    let func = Func::new(&mut store, func_ty.clone(), |_,_,_| {
-                        println!("called imported");
-                        Ok(())
-                    });
-                    externlts.push(func.into());
+                        let func = Func::new(&mut store, func_ty.clone(), |caller, params, results| {
+                            if params.len() > 0 {
+                                for i in params {
+                                    println!("param is for: {:#?}", i);
+                                }
+                            }
+                            if results.len() > 0 {
+                                for i in results {
+                                    println!("res {i:#?}")
+                                }
+                            }
+                            else {
+                                results[0] = Val::I32(0);
+                            }
+                            Ok(())
+                        });
+                        externlts.push(func.into());
                 }
                 ExternType::Global(global_ty) => {
                     let val = match global_ty.content() {
@@ -159,7 +171,7 @@ fn wasmtime_runner(path: &str,register : SelectorRegistry) -> anyhow::Result<()>
                         ValType::I64 => Val::I64(0),
                         ValType::F32 => Val::F32(0),
                         ValType::F64 => Val::F64(0),
-                        _ => unimplemented!("Unsupported global type"),
+                        _ => unimplemented!("Unsupported for dummy global type"),
                     };
                 }
                 ExternType::Table(table_ty) => {
@@ -251,17 +263,42 @@ fn wasmtime_runner(path: &str,register : SelectorRegistry) -> anyhow::Result<()>
     let output_offset = output_ptr as usize;
     let mut sum_bytes = [0u8;4];
     let mut product_bytes = [0u8;4];
-    memory.read(&store, output_offset, &mut sum_bytes)?;
-    memory.read(&store, output_offset + 4, &mut product_bytes)?;
+    let mut pass_sum_ptr_bytes = [0u8;4];
+    let _read_sum = memory.read(&store, output_offset, &mut sum_bytes)?;
+    let _read_product = memory.read(&store, output_offset + 4, &mut product_bytes)?;
+    let _read_pass_sum_ptr = memory.read(&store, output_offset + 8, &mut pass_sum_ptr_bytes)?;
+
+    let pass_res_ptr = u32::from_le_bytes(pass_sum_ptr_bytes) as usize;
+    println!("pass_res_ptr {}", pass_res_ptr);
+
+    if pass_res_ptr == 0 {
+        panic!("pass_res pointer is null (0)");
+    }
+    let mut array_header_bytes = [0u8;16];
+    let _read_pass_sum_data = memory.read(&store, pass_res_ptr, &mut array_header_bytes)?;
+    let pass_res_length = u32::from_le_bytes(array_header_bytes[4..8].try_into().unwrap()) as usize;
+    let pass_res_data_ptr = u32::from_le_bytes(array_header_bytes[12..16].try_into().unwrap()) as usize;
+    println!("res_length: {}, res_data_ptr: {}", pass_res_length,pass_res_data_ptr);
     // Output schema:
     // {
     //      sum : i32,
     //      product : i32
+    //      pass_res: Array<i32>
     // }
+    println!("output_ptr = {output_ptr:?}");
     let sum = i32::from_le_bytes(sum_bytes);
     let product = i32::from_le_bytes(product_bytes);
-
-    println!("Output: \n Sum: {} \n, Product: {}", sum, product);
+    let mut pass_res_values = Vec::new();
+    let mut val = 0;
+    for i in 0..pass_res_length {
+        let mut elem_bytes = [0u8;4];
+        memory.read(&store, pass_res_data_ptr * i + 4, &mut elem_bytes)?;
+        val = i32::from_le_bytes(elem_bytes);
+        // println!("val: {val}");
+        pass_res_values.push(val);
+    }
+    println!("size: {}",val);
+    println!("Output: \n Sum: {} \n, Product: {} \n, Pass_res: ", sum, product);
     Ok(())
 }
 
