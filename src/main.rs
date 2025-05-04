@@ -1,6 +1,7 @@
 mod core;
 mod traits;
 mod utils;
+mod server;
 
 use wasmtime::*;
 use serde::{Deserialize};
