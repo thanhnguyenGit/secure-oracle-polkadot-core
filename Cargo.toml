@@ -21,10 +21,12 @@ regex = "1.10"
 clap = { version = "4.0", features = ["derive"] }
 sha2 = "0.10.8"
 hex = "0.4.3"
-hyper = { version = "1", features = ["full"] }
 tokio = { version = "1", features = ["full"] }
-http-body-util = "0.1"
-hyper-util = { version = "0.1", features = ["full"] }
+hyper = { version = "0.14", features = ["full"] }
+hyper-tls = "0.5"
+reqwest = { version = "0.11", features = ["json", "rustls-tls"] }
 wasmparser = {version = "0.200.0"}
 dynamic_struct = { path = "dynamic_struct" }
-
+parity-scale-codec = "3.6.12"
+parity-scale-codec-derive = "3.6.12"
+http = "0.2.12"

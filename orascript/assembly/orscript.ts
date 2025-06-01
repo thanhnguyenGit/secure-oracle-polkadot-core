@@ -1,3 +1,5 @@
+// export const url: string = "https://catfact.ninja/fact";
+
 class Input {
     a: i32;
     b: i32;
@@ -7,9 +9,8 @@ class Output {
     sum: i32;
     product: i32;
     pass_res: Array<i32>;
-
     constructor() {
-        this.pass_res = new Array<i32>(20);
+        this.pass_res = new Array<i32>(17);
     }
 }
 
@@ -27,4 +28,9 @@ function calculate_sum(a: i32, b: i32): i32 {
 
 function calculate_product(a: i32, b: i32): i32 {
     return a * b;
+}
+
+function parse_input_string(json_str: string) : Input {
+    let input = new Input();
+
 }

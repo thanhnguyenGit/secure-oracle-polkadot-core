@@ -1,13 +1,18 @@
 use std::any::Any;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::fs::File;
 use std::io::Read;
 use anyhow::{anyhow,Result};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use wasmtime::{Engine, Func, Instance, Module, Store, Val, Linker, Caller, ImportType, Table, Extern, ExternType, ValType, V128, Ref, WasmTy};
+use wasmtime::{Engine, Func, Instance, Module, Store, Val, Linker, Caller, ImportType, Table, Extern, ExternType, ValType, V128, Ref, WasmTy, TypedFunc, Memory};
 use dynamic_struct::generate_struct;
+use parity_scale_codec;
+use parity_scale_codec::{Decode, Encode};
+use parity_scale_codec_derive::{Decode, Encode};
+use serde_json::Value;
+
 #[derive(Debug, Deserialize)]
 struct Root {
     headers : Header,
@@ -58,7 +63,7 @@ struct SelectorRegistry {
     origin : String,
     functions : HashMap<String,Function>,
     variables : HashMap<String,Variable>,
-    classes_schema : HashMap<String,(String,Vec<Param>)>
+    classes_schema : HashMap<String,Vec<Param>>
 }
 
 pub fn abi_reader(abi_path: &str, wasm_bytecode_path: &str) -> anyhow::Result<()> {
@@ -80,7 +85,7 @@ pub fn abi_reader(abi_path: &str, wasm_bytecode_path: &str) -> anyhow::Result<()
         selector_registry.functions.insert(value.selector.clone(),value);
     }
     for value in root.classes.into_iter().flat_map(|class| {
-        selector_registry.classes_schema.insert(class.class_selector.clone(),(class.name,class.fields));
+        selector_registry.classes_schema.insert(class.name,class.fields);
         class.methods.into_iter()
     }) {
         selector_registry.functions.insert(value.selector.clone(),value);
@@ -108,22 +113,60 @@ fn check_header_hash(header : &str,wasm_bytecode_path: &str) -> bool {
     header.eq(&wasm_hash)
 }
 
-fn wasmtime_runner(path: &str,register : SelectorRegistry) -> anyhow::Result<()> {
-    // generate_struct!(
-    // r#"[
-    //     {
-    //         "name": "a",
-    //         "param_type": "i32"
-    //     },
-    //     {
-    //         "name": "b",
-    //         "param_type": "i32"
-    //     }
-    // ]"#
-    // );
-    // let instance = ASCStruct { a: 42, b: 100 };
-    // println!("Proc macro work a: {}, b: {}", instance.a, instance.b);
 
+
+fn cal_output_size(register: &SelectorRegistry) -> (Vec<i32>, i32){
+    let mut vec_of_size = Vec::new();
+    let mut total_input_size : i32 = 0;
+    for (k, v) in register.classes_schema.iter() {
+        match k.as_str() {
+            "Output" => {
+                for field in v.iter() {
+                    let size = match field.param_type.as_str() {
+                        "i32" => {vec_of_size.push(4);4},
+                        "i64" => {vec_of_size.push(4);4},
+                        "f32" => {vec_of_size.push(8);8},
+                        "f64" => {vec_of_size.push(8);8},
+                        typ if typ.starts_with("Array<") => {
+
+                            vec_of_size.push(4);
+                            4
+                        },
+                        typ if typ.eq("string") => {vec_of_size.push(4);4},
+                        _ => {
+                            vec_of_size.push(4);
+                            4
+                        }
+                    };
+                    total_input_size += size;
+                }
+                println!("{} total input size: {}",k.as_str(),total_input_size);
+            }
+            _ => continue
+        }
+    }
+    (vec_of_size,total_input_size)
+}
+
+fn read_utf16_string(memory: &Memory, store: &mut Store<()>, ptr: usize, max_len: usize) -> anyhow::Result<String> {
+    // Read 2 * max_len bytes since UTF-16 uses 2 bytes per character
+    let mut raw_bytes = vec![0u8; max_len * 2];
+    memory.read(store, ptr, &mut raw_bytes)?;
+
+    // Convert raw bytes into u16s (little endian)
+    let utf16_units: Vec<u16> = raw_bytes
+        .chunks_exact(2)
+        .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]]))
+        // stop at null terminator
+        .take_while(|&u| u != 0)
+        .collect();
+
+    let decoded = String::from_utf16(&utf16_units)?;
+    Ok(decoded)
+}
+
+
+fn wasmtime_runner(path: &str, register : SelectorRegistry) -> anyhow::Result<()> {
     let engine = Engine::default();
     let mut store = Store::new(&engine, ());
     let module = Module::from_file(&engine, path)?;
@@ -134,7 +177,8 @@ fn wasmtime_runner(path: &str,register : SelectorRegistry) -> anyhow::Result<()>
     //     println!("Key: {k:#?} - Value: {v:#?}");
     // }
     // for (k,v) in register.classes_schema.iter() {
-    //     println!("Key: {k:#?} - Value: {v:#?}");
+    //         println!("Key: {k:#?} - Value: {v:#?}")
+    //
     // }
     // -----
     let mut externlts : Vec<Extern> = Vec::new();
@@ -159,11 +203,11 @@ fn wasmtime_runner(path: &str,register : SelectorRegistry) -> anyhow::Result<()>
                                 }
                             }
                             else {
-                                results[0] = Val::I32(0);
+                                // results[0] = Val::I32(0);
                             }
                             Ok(())
                         });
-                        externlts.push(func.into());
+                    externlts.push(func.into());
                 }
                 ExternType::Global(global_ty) => {
                     let val = match global_ty.content() {
@@ -184,122 +228,158 @@ fn wasmtime_runner(path: &str,register : SelectorRegistry) -> anyhow::Result<()>
     }
 
     let instance = Instance::new(&mut store, &module, &externlts)?;
-
-    // READ CONSTANT VARIABLE
-    // ---------------------------------------------------------------------------------------
-    // Cái này để test, sau này sẽ chỉ có một entrypoint.
-    // let entry_selector = "0xf212493a";
-
-    // let trigger_func = func.call(&mut store, &typ_val_map, &mut [I32(12)]).expect("Bruh");
-    // println!("Result of add(42, 58): {}", trigger_func);
-
-    // let add_func = instance
-    //     .get_typed_func::<(i32, i32), i32>(&mut store, "add")?;
-    // let sum = add_func.call(&mut store, (42, 58))?;
-    // println!("Result of add(42, 58): {}", sum);
-    //
-    // let shout_func = instance
-    //     .get_typed_func::<(), i32>(&mut store, "shout")?;
-    // let shout_result = shout_func.call(&mut store, ())?;
-    // println!("Result of shout(): {}", shout_result);
-    //
-    // let url_global = instance.get_global(&mut store, "url").unwrap();
-    // let url_value = url_global.get(&mut store).i32().unwrap();
-    // println!("Value of url global: {}", url_value);
-
-    // let memory = instance
-    //     .get_memory(&mut store, "memory")
-    //     .ok_or_else(|| anyhow::anyhow!("Failed to get memory"))?;
-    // let memory_data = memory.data(&store);
-    //
-    // let offset_1036 = 1036;
-    // let data_at_1036 = memory_data[offset_1036 as usize];
-    // println!("Data at offset 1036: {:x}", data_at_1036);
-    //
-    // let offset_1048 = 1048;
-    // print!("Raw bytes at offset 1048: ");
-    // for i in 0..20 {
-    //     if (offset_1048 + i) < memory_data.len() as u32 {
-    //         print!("{:02x} ", memory_data[(offset_1048 + i) as usize]);
-    //     }
-    // }
-    // println!();
-
-    // let string_offset = 1056;
-    // let mut chars = Vec::new();
-    // let mut i = url_value as usize;
-    // while i + 1 < memory_data.len() {
-    //     let low_byte = memory_data[i];
-    //     let high_byte = memory_data[i + 1];
-    //     if low_byte == 0 && high_byte == 0 {
-    //         break; // Null terminator
-    //     }
-    //     let char_code = u16::from_le_bytes([low_byte, high_byte]);
-    //     chars.push(char::from_u32(char_code as u32).unwrap_or('?'));
-    //     i += 2;
-    // }
-    // let string = chars.into_iter().collect::<String>();
-    // println!("String at offset 1056: {}", string);
-    // ---------------------------------------------------------------------------------------
-
     let memory = instance.get_memory(&mut store, "memory").expect("Memory not found");
-    let alloc = instance.get_typed_func::<(i32,i32),i32>(&mut store, "__new")?;
-    let process_func = instance.get_typed_func::<i32,i32>(&mut store, "process")?;
+    // let alloc = instance.get_typed_func::<(i32,i32),i32>(&mut store, "__new")?;
+    let process_func = instance.get_typed_func::<(i32,i32),i32>(&mut store, "process")?;
 
+    let json = r#"{"bitcoin":{"usd":104700},"ethereum":{"usd":2523.13}}"#;
+    let json_bytes = json.as_bytes();
+    let json_offset = 0;
 
-    let input_ptr = alloc.call(&mut store, (8,0))?;
-    // Input schema:
-    // {
-    //      a : i32,
-    //      b : i32
-    // }
-    let a : i32 = 20;
-    let b : i32 = 69;
-    let input_offset = input_ptr as usize;
-    memory.write(&mut store, input_offset, &a.to_le_bytes())?;
-    memory.write(&mut store, input_offset + 4, &b.to_le_bytes())?;
+    memory.write(&mut store, json_offset as usize, json_bytes)?;
 
-    let output_ptr = process_func.call(&mut store, input_ptr)?;
-    let output_offset = output_ptr as usize;
-    let mut sum_bytes = [0u8;4];
-    let mut product_bytes = [0u8;4];
-    let mut pass_sum_ptr_bytes = [0u8;4];
-    let _read_sum = memory.read(&store, output_offset, &mut sum_bytes)?;
-    let _read_product = memory.read(&store, output_offset + 4, &mut product_bytes)?;
-    let _read_pass_sum_ptr = memory.read(&store, output_offset + 8, &mut pass_sum_ptr_bytes)?;
+    let mut confirm = [0u8;10240];
+    memory.read(&mut store, json_offset as usize, &mut confirm)?;
 
-    let pass_res_ptr = u32::from_le_bytes(pass_sum_ptr_bytes) as usize;
-    println!("pass_res_ptr {}", pass_res_ptr);
+    let ret_ptr = process_func.call(&mut store, (json_offset, json_bytes.len() as i32))?;
+    let output_offset = ret_ptr as usize;
 
-    if pass_res_ptr == 0 {
-        panic!("pass_res pointer is null (0)");
-    }
-    let mut array_header_bytes = [0u8;16];
-    let _read_pass_sum_data = memory.read(&store, pass_res_ptr, &mut array_header_bytes)?;
-    let pass_res_length = u32::from_le_bytes(array_header_bytes[4..8].try_into().unwrap()) as usize;
-    let pass_res_data_ptr = u32::from_le_bytes(array_header_bytes[12..16].try_into().unwrap()) as usize;
-    println!("res_length: {}, res_data_ptr: {}", pass_res_length,pass_res_data_ptr);
-    // Output schema:
-    // {
-    //      sum : i32,
-    //      product : i32
-    //      pass_res: Array<i32>
-    // }
-    println!("output_ptr = {output_ptr:?}");
-    let sum = i32::from_le_bytes(sum_bytes);
-    let product = i32::from_le_bytes(product_bytes);
-    let mut pass_res_values = Vec::new();
-    let mut val = 0;
-    for i in 0..pass_res_length {
-        let mut elem_bytes = [0u8;4];
-        memory.read(&store, pass_res_data_ptr * i + 4, &mut elem_bytes)?;
-        val = i32::from_le_bytes(elem_bytes);
-        // println!("val: {val}");
-        pass_res_values.push(val);
-    }
-    println!("size: {}",val);
-    println!("Output: \n Sum: {} \n, Product: {} \n, Pass_res: ", sum, product);
+    let mut bytes_result: Vec<u8> = Vec::new();
+
+    if register.classes_schema.contains_key("Output") {
+        let mut offset_val = 0;
+        match  register.classes_schema.get("Output") {
+            None => {}
+            Some(val) => {
+                for params in val {
+                    println!("Val {:?}", params);
+                    println!("Offset val: {}", offset_val);
+                    match params.param_type.as_str() {
+                        "i32" => {
+                            let mut result = [0u8;4];
+                            memory.read(&mut store, output_offset + offset_val, &mut result)?;
+                            offset_val = offset_val + 4;
+                            let ptr = i32::from_le_bytes(result);
+                            println!("process returned pointer: {}", ptr);
+                            println!("process returned pointer: {:?}", ptr.encode());
+                            bytes_result.extend_from_slice(&ptr.encode());
+                        },
+                        "f32" => {
+                            let mut result = [0u8;4];
+                            memory.read(&mut store, output_offset + offset_val, &mut result)?;
+                            offset_val = offset_val + 4;
+                            let ptr = f32::from_le_bytes(result);
+                            println!("process returned pointer: {}", ptr);
+                            println!("process returned pointer: {:?}", ptr.encode());
+                            bytes_result.extend_from_slice(&ptr.encode());
+                        },
+                        "i64" => {
+                            let mut result = [0u8;8];
+                            memory.read(&mut store, output_offset + offset_val, &mut result)?;
+                            offset_val = offset_val + 8;
+                            let ptr = i64::from_le_bytes(result);
+                            println!("process returned pointer: {}", ptr);
+                            println!("process returned pointer: {:?}", ptr.encode());
+                            bytes_result.extend_from_slice(&ptr.encode());
+                        },
+                        "f64" => {
+                            let mut result = [0u8;8];
+                            memory.read(&mut store, output_offset + offset_val, &mut result)?;
+                            offset_val = offset_val + 8;
+                            let ptr = f64::from_le_bytes(result);
+                            println!("process returned pointer: {}", ptr);
+                            println!("process returned pointer: {:?}", ptr.encode());
+                            bytes_result.extend_from_slice(&ptr.encode());
+                        },
+                        typ if typ.starts_with("Array<") => {
+                            if let Some(inner) = typ.strip_prefix("Array<").and_then(|s| s.strip_suffix('>')) {
+                                if register.classes_schema.contains_key(inner) {
+                                    println!("Array of class {}", inner);
+                                    let mut result = [0u8; 4];
+                                    memory.read(&mut store, output_offset + offset_val, &mut result)?;
+                                    offset_val = offset_val + 4;
+                                    let custom_arr_ptr = u32::from_le_bytes(result) as usize;
+                                    // println!("process returned pointer: {}", custom_arr_ptr);
+                                    let mut array_header_bytes = [0u8; 16];
+                                    memory.read(&store, custom_arr_ptr as usize, &mut array_header_bytes)?;
+                                    // println!("array_header_bytes: {:?}", array_header_bytes);
+                                    let pass_res_data_ptr = u32::from_le_bytes(array_header_bytes[4..8].try_into().unwrap()) as usize;
+                                    let pass_res_data_cap = u32::from_le_bytes(array_header_bytes[12..16].try_into().unwrap()) as usize;
+                                    if pass_res_data_ptr == 0 {
+                                        panic!("pass_res data pointer is null (0)");
+                                    }
+
+                                    let mut crypto_values = Vec::new();
+                                    for i in 0..pass_res_data_cap {
+                                        let elem_offset = pass_res_data_ptr + (i * 4);
+                                        let mut elem_bytes = [0u8; 4];
+                                        memory.read(&store, elem_offset, &mut elem_bytes)?;
+                                        let ptr = u32::from_le_bytes(elem_bytes) as usize;
+
+                                        if ptr == 0 {
+                                            continue;
+                                        }
+                                        let mut usd_bytes = [0u8; 4];
+                                        memory.read(&store, ptr, &mut usd_bytes)?;
+                                        let value = f32::from_le_bytes(usd_bytes);
+
+                                        println!("CryptoValue[{}].usd: {}", i, value);
+                                        println!("process returned pointer: {:?}", value.encode());
+                                        crypto_values.push(value);
+                                    }
+                                    bytes_result.extend_from_slice(&crypto_values.encode());
+                                } else {
+                                    println!("Not an Array<T> type.");
+                                }
+                            }
+                        },
+                        typ if typ.eq("string") => {
+                            let mut result = [0u8;4];
+                            memory.read(&mut store, output_offset + offset_val, &mut result)?;
+                            offset_val = offset_val + 4;
+                            let ptr = u32::from_le_bytes(result) as usize;
+                            let string_out = read_utf16_string(&memory,&mut store, ptr,1024).ok().unwrap_or_default();
+                            println!("string out {:?}", string_out.clone());
+                            println!("string out {:?}", string_out.clone().encode());
+                            bytes_result.extend_from_slice(&string_out.encode());
+                        }
+                        _ => {
+                            let mut result = [0u8;4];
+                            memory.read(&mut store, output_offset + offset_val, &mut result)?;
+                            offset_val = offset_val + 4;
+                            let ptr = u32::from_le_bytes(result) as usize;
+                            println!("process returned pointer: {}", ptr);
+                        }
+                    }
+                    }
+                }
+
+            }
+        }
+    println!("Byte res {:?}",bytes_result);
+    build_result(&bytes_result);
     Ok(())
+}
+
+
+#[derive(Debug, Decode)]
+struct CryptoValue {
+    usd: f32,
+}
+
+#[derive(Debug, Decode)]
+struct Output {
+    greater: String,
+    custom: Vec<CryptoValue>,
+    primi_i: i32,
+    pmimi_f: f32,
+}
+fn build_result(val: &[u8]) {
+    let bytes: Vec<u8> = val.iter().map(|x| (x & 0xFF) as u8).collect();
+    match Output::decode(&mut &bytes[..]) {
+        Ok(decoded) => println!("{:#?}", decoded),
+        Err(e) => println!("Failed to decode: {}", e),
+    }
 }
 
 

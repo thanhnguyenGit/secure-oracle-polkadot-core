@@ -1,0 +1,76 @@
+{
+  "headers": {
+    "name": null,
+    "header": "0x005ae53ac4d6105dcd19b95c19036622c9fd174946d09283cf8cafa41431c9c6"
+  },
+  "functions": [
+    {
+      "name": "process",
+      "params": [
+        {
+          "name": "json_ptr",
+          "type": "usize"
+        },
+        {
+          "name": "len",
+          "type": "usize"
+        }
+      ],
+      "result": "Output",
+      "selector": "0x480104f2"
+    }
+  ],
+  "classes": [
+    {
+      "class_selector": "0x5056459c",
+      "name": "CryptoValue",
+      "fields": [
+        {
+          "name": "usd",
+          "type": "f32"
+        }
+      ],
+      "methods": []
+    },
+    {
+      "class_selector": "0x53e2199d",
+      "name": "Input",
+      "fields": [
+        {
+          "name": "bitcoin",
+          "type": "CryptoValue"
+        },
+        {
+          "name": "ethereum",
+          "type": "CryptoValue"
+        }
+      ],
+      "methods": []
+    },
+    {
+      "class_selector": "0xdcc2885c",
+      "name": "Output",
+      "fields": [
+        {
+          "name": "greater",
+          "type": "string"
+        },
+        {
+          "name": "custom",
+          "type": "Array<CryptoValue>"
+        },
+        {
+          "name": "primi_i",
+          "type": "i32"
+        },
+        {
+          "name": "pmimi_f",
+          "type": "f32"
+        }
+      ],
+      "methods": []
+    }
+  ],
+  "variables": [],
+  "imports": []
+}

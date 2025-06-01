@@ -119,12 +119,13 @@ fn validate_args(args: &Args) -> Result<()> {
     Ok(())
 }
 
-fn convert_ts_to_wasm(input: &str, wasm_output: &str) -> Result<()> {
+fn compile_as_to_wasm(input: &str, wasm_output: &str) -> Result<()> {
     let output = Command::new("asc")
         .arg(input)
         .arg("--outFile")
         .arg(wasm_output)
         .arg("--optimize")
+        // .arg("--exportRuntime")
         .output()
         .map_err(|err| anyhow!("Failed to execute 'asc' command, error at: {}", err))?;
     if !output.status.success() {
@@ -151,8 +152,8 @@ pub fn abi_parser() -> Result<()> {
     let args = Args::parse();
     validate_args(&args)?;
     let wasm_output = args.input.replace(".ts", ".wasm");
-    convert_ts_to_wasm(&args.input, &wasm_output)?;
-
+    println!("path {:?}", wasm_output);
+    compile_as_to_wasm(&args.input, &wasm_output)?;
     let wasm_hash = {
         let mut header_hasher = Sha256::new();
         let mut wasm_reader = File::open(&wasm_output)

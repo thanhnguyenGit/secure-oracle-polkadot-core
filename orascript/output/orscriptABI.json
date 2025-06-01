@@ -1,7 +1,7 @@
 {
   "headers": {
     "name": null,
-    "header": "0x0b773c3548a0517c7481dc0d6a5b87e3fc6fe4370299c22eaea3b1ac29980b27"
+    "header": "0x0f8adf4f39ca6934065c9477f539f6d05ff8f9363e52bd902f49e2f5c7246df2"
   },
   "functions": [
     {
@@ -12,7 +12,7 @@
           "type": "Input"
         }
       ],
-      "result": "Ouput",
+      "result": "Output",
       "selector": "0x2d60647e"
     }
   ],
@@ -33,8 +33,8 @@
       "methods": []
     },
     {
-      "class_selector": "0x43cdb082",
-      "name": "Ouput",
+      "class_selector": "0xdcc2885c",
+      "name": "Output",
       "fields": [
         {
           "name": "sum",
@@ -43,11 +43,21 @@
         {
           "name": "product",
           "type": "i32"
+        },
+        {
+          "name": "pass_res",
+          "type": "Array<i32>"
         }
       ],
       "methods": []
     }
   ],
-  "variables": [],
+  "variables": [
+    {
+      "name": "url",
+      "type": "string",
+      "selector": "0x901752af"
+    }
+  ],
   "imports": []
 }

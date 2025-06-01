@@ -1,20 +1,52 @@
 {
   "headers": {
     "name": null,
-    "header": "0xec7ee827249c30cbff64ed7d54596dcdc33e55659d71d1ffde936895aeaa1f28"
+    "header": "0xe2a07b61f6d39a44ed30399886c361aeb1cd00bf61b612732f3e36559dac1988"
   },
-  "functions": [],
+  "functions": [
+    {
+      "name": "process",
+      "params": [
+        {
+          "name": "input",
+          "type": "Input"
+        }
+      ],
+      "result": "Output",
+      "selector": "0x2d60647e"
+    }
+  ],
   "classes": [
     {
-      "name": "SourceSchema",
+      "class_selector": "0x53e2199d",
+      "name": "Input",
       "fields": [
         {
-          "name": "fact",
-          "type": "string"
+          "name": "a",
+          "type": "i32"
         },
         {
-          "name": "length",
-          "type": "string"
+          "name": "b",
+          "type": "i32"
+        }
+      ],
+      "methods": []
+    },
+    {
+      "class_selector": "0xdcc2885c",
+      "name": "Output",
+      "fields": [
+        {
+          "name": "sum",
+          "type": "i32"
+        },
+        {
+          "name": "product",
+          "type": "i32"
+        },
+        {
+          "name": "pass_res",
+          "type": "Array<i32>"
         }
       ],
       "methods": []

@@ -1,4 +1,4 @@
-export const cat_fact_url: string = "https://catfact.ninja/fact";
+export const cat_fact: string = "https://catfact.ninja/fact";
 
 class SourceSchema {
     fact: string;
